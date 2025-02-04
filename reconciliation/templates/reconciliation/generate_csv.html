@@ -1,0 +1,25 @@
+{% extends "reconciliation/base.html" %}
+{% block title %}CSV Generator{% endblock %}
+{% block content %}
+<div class="card mb-4 shadow-sm">
+    <div class="card-body">
+        <h2 class="card-title">CSV Generator</h2>
+        <p class="card-text">
+            Enter the file names for your CSV files below. When you submit the form, the system
+            will generate the CSV files (with random errors) and download them in a ZIP archive.
+        </p>
+        <form method="post">
+            {% csrf_token %}
+            <div class="mb-3">
+                <label for="internal_filename" class="form-label">Internal CSV Filename</label>
+                <input type="text" class="form-control" id="internal_filename" name="internal_filename" placeholder="internal_trades.csv" required>
+            </div>
+            <div class="mb-3">
+                <label for="external_filename" class="form-label">External CSV Filename</label>
+                <input type="text" class="form-control" id="external_filename" name="external_filename" placeholder="external_trades.csv" required>
+            </div>
+            <button type="submit" class="btn btn-primary">Generate CSV Files</button>
+        </form>
+    </div>
+</div>
+{% endblock %}
