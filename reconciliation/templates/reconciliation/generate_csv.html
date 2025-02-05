@@ -22,4 +22,16 @@
         </form>
     </div>
 </div>
+
+<!-- New Section for Dummy Trades CSV Generation -->
+<div class="card mb-4 shadow-sm">
+    <div class="card-body">
+        <h2 class="card-title">Dummy Trades CSV Generator</h2>
+        <p class="card-text">
+            Click the button below to generate a CSV file with dummy trade data for the following cryptocurrencies:
+            Bitcoin (BTC), Ethereum (ETH), XRP (XRP), BNB (BNB), and Litecoin (LTC).
+        </p>
+        <a href="{% url 'generate_dummy_trades' %}" class="btn btn-secondary">Generate Dummy Trades CSV</a>
+    </div>
+</div>
 {% endblock %}

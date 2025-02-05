@@ -5,11 +5,13 @@ import zipfile
 from django.shortcuts import render
 from django.http import HttpResponse
 from django.contrib import messages
+import requests
+import csv, io
+from django.shortcuts import render
+from django.http import HttpResponse
 
 def index(request):
-    """
-    Reconciliator view: accepts two CSV files, performs reconciliation, and displays results.
-    """
+
     reconciliation_result = None
 
     if request.method == 'POST':
@@ -77,11 +79,7 @@ def index(request):
 
 
 def generate_csv_view(request):
-    """
-    CSV Generator view: Displays a form to name the CSV files.
-    On form submission, generates 100 internal trades and matching external trades (with random errors),
-    adds one extra trade in the external file, packages them into a ZIP, and returns the ZIP as a download.
-    """
+
     if request.method == 'POST':
         # Get user-provided file names; add .csv if missing.
         internal_filename = request.POST.get('internal_filename', 'internal_trades.csv').strip()
@@ -149,3 +147,160 @@ def generate_csv_view(request):
     else:
         # Render the CSV Generator form.
         return render(request, 'reconciliation/generate_csv.html')
+    
+import requests
+import csv, io
+from django.shortcuts import render
+from django.http import HttpResponse
+
+def crypto_pnl_view(request):
+    """
+    This view fetches live crypto data for BTC, ETH, LTC, XRP, and BNB.
+    It displays a form for uploading a CSV file of trades.
+    Upon upload, it computes the PnL for each trade (and aggregates by symbol)
+    and calculates a weighted average entry price for buy trades.
+    """
+    # Define coins to fetch (CoinGecko uses IDs like "bitcoin", "ethereum", etc.)
+    coin_ids = "bitcoin,ethereum,litecoin,ripple,binancecoin"
+    api_url = "https://api.coingecko.com/api/v3/coins/markets"
+    params = {
+        "vs_currency": "usd",
+        "ids": coin_ids,
+    }
+    response = requests.get(api_url, params=params)
+    if response.status_code == 200:
+        crypto_data = response.json()
+        # Build a dictionary keyed by the uppercase symbol (e.g., "BTC")
+        live_prices = {}
+        for coin in crypto_data:
+            live_prices[coin["symbol"].upper()] = {
+                "current_price": coin["current_price"],
+                "high_24h": coin.get("high_24h"),
+                "low_24h": coin.get("low_24h"),
+                "name": coin["name"],
+            }
+    else:
+        live_prices = {}
+
+    pnl_results = {}  # Aggregated PnL per crypto symbol
+    trades = []       # List to store processed trade records
+
+    # Dictionaries to accumulate total cost and quantity for "buy" trades (for weighted average entry price)
+    entry_prices = {}
+    entry_quantities = {}
+
+    # Process CSV file upload if present
+    if request.method == "POST" and "trade_file" in request.FILES:
+        trade_file = request.FILES["trade_file"]
+        decoded_file = trade_file.read().decode("utf-8")
+        io_string = io.StringIO(decoded_file)
+        reader = csv.DictReader(io_string)
+        
+        # Expected CSV columns: trade_id, symbol, trade_type, quantity, trade_price, trade_date
+        for row in reader:
+            symbol = row["symbol"].strip().upper()
+            trade_type = row.get("trade_type", "buy").strip().lower()  # default to "buy" if not specified
+            try:
+                quantity = float(row["quantity"])
+                trade_price = float(row["trade_price"])
+            except ValueError:
+                continue  # Skip rows with invalid numeric data
+
+            live_price = live_prices.get(symbol, {}).get("current_price")
+            if live_price is None:
+                pnl = None
+            else:
+                # Simple PnL calculation:
+                # For buy: (live_price - trade_price) * quantity
+                # For sell: (trade_price - live_price) * quantity
+                if trade_type == "buy":
+                    pnl = (live_price - trade_price) * quantity
+                elif trade_type == "sell":
+                    pnl = (trade_price - live_price) * quantity
+                else:
+                    pnl = None
+            row["pnl"] = pnl
+            trades.append(row)
+            if pnl is not None:
+                pnl_results[symbol] = pnl_results.get(symbol, 0) + pnl
+
+            # For entry price calculation, we only consider "buy" trades.
+            if trade_type == "buy":
+                if symbol in entry_prices:
+                    entry_prices[symbol] += trade_price * quantity
+                    entry_quantities[symbol] += quantity
+                else:
+                    entry_prices[symbol] = trade_price * quantity
+                    entry_quantities[symbol] = quantity
+
+    # Attach PnL and weighted average entry price to each coin in live_prices
+    for symbol, coin in live_prices.items():
+        coin["pnl"] = pnl_results.get(symbol, 0)  # Default to 0 if no trades exist
+        if symbol in entry_prices and entry_quantities[symbol] > 0:
+            coin["entry"] = entry_prices[symbol] / entry_quantities[symbol]
+        else:
+            coin["entry"] = None
+
+    context = {
+        "live_prices": live_prices,
+        "pnl_results": pnl_results,  # Still available if needed
+        "trades": trades,
+    }
+    return render(request, "reconciliation/crypto_pnl.html", context)
+
+import csv
+import io
+import random
+from datetime import date, timedelta
+from django.http import HttpResponse
+
+def generate_dummy_trades_csv(request):
+    """
+    Generate a CSV file containing dummy trades for a set of cryptocurrencies.
+    
+    Dummy trade columns:
+      - trade_id: A unique trade identifier (e.g., T001, T002, …)
+      - symbol: The coin symbol (e.g., BTC, ETH, XRP, BNB, LTC)
+      - trade_type: "buy" or "sell" (randomly chosen)
+      - quantity: A random float (in units of the coin)
+      - trade_price: A random price between the coin's low and high for the day
+      - trade_date: A random date within the past 7 days
+    """
+    # Define our coins with the provided dummy data.
+    coins = [
+        {"symbol": "BTC", "current_price": 97494, "high": 99019, "low": 96026},
+        {"symbol": "ETH", "current_price": 2764.7, "high": 2824.26, "low": 2633.94},
+        {"symbol": "XRP", "current_price": 2.42, "high": 2.57, "low": 2.36},
+        {"symbol": "BNB", "current_price": 569.01, "high": 578.36, "low": 557.25},
+        {"symbol": "LTC", "current_price": 104.31, "high": 108.19, "low": 98.76},
+    ]
+
+    # Create an in-memory file to hold the CSV data.
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    # Write CSV header
+    writer.writerow(["trade_id", "symbol", "trade_type", "quantity", "trade_price", "trade_date"])
+
+    # Set the number of dummy trades to generate.
+    num_trades = 20
+
+    for i in range(1, num_trades + 1):
+        # Randomly choose one coin
+        coin = random.choice(coins)
+        trade_id = f"T{i:03d}"  # e.g., T001, T002, ...
+        trade_type = random.choice(["buy", "sell"])
+        # Generate a random quantity between 0.1 and 5.0 (you can adjust this range)
+        quantity = round(random.uniform(0.1, 5.0), 4)
+        # Generate a random trade price between the coin's low and high
+        trade_price = round(random.uniform(coin["low"], coin["high"]), 2)
+        # Generate a random trade date in the past 7 days.
+        days_ago = random.randint(0, 7)
+        trade_date = (date.today() - timedelta(days=days_ago)).isoformat()
+        
+        writer.writerow([trade_id, coin["symbol"], trade_type, quantity, trade_price, trade_date])
+
+    # Prepare the CSV data as a downloadable file.
+    response = HttpResponse(output.getvalue(), content_type="text/csv")
+    response["Content-Disposition"] = 'attachment; filename="dummy_trades.csv"'
+    return response
